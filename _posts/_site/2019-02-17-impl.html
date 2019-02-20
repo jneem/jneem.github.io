@@ -1,0 +1,41 @@
+<p>I’ve written quite a bit about the <em>theory</em> of patches and merging, but nothing
+yet about how to actually implement anything efficiently. TODO…</p>
+
+<h1 id="three-scales-of-size">Three scales of size</h1>
+
+<p>Before getting to the juicy details, we have to decide what it means for things
+to be fast. In a VCS, there are three different size scales that we need
+to think about. From smallest to biggest, we have:</p>
+
+<ol>
+  <li>The size of the <em>change</em>. Like, if we’re changing one line in a giant file,
+then the size of the change is just the length of the one line that we’re
+changing.</li>
+  <li>The size of the <em>current repository</em>. In the case of <code class="highlighter-rouge">jp</code> (which just tracks
+a single file), this is just the size of the file.</li>
+  <li>The size of the <em>history</em>. This includes everything that has ever been in
+the repository, so if the repository has been active for years then the size
+of the history could be much bigger than the current size.</li>
+</ol>
+
+<p>The first obvious requirement is that the size of a patch should be
+proportional to the size of the change. This sounds almost too obvious to
+mention, but remember the definition of a patch from <a href="https://??">this</a> post: a
+patch consists of a source file, a target file, and a function from one to the
+other that has certain additional properties. If we were to naively translate
+this definition into code, the size of a patch would be proportional to the
+size of the entire file.</p>
+
+<p>Of course, this is a solved problem in the world of UNIX-style diffs (which I
+mentioned all the way back in the <a href="https://??">first post</a>). The problem is to 
+adapt the diff approach to our mathematical patch framework; for example, the
+fact that our files need not even be ordered means that it doesn’t make sense
+to talk about inserting a line “after line 62.”</p>
+
+<p>The key to solving this turns out to be to unique IDs: give every line in the
+entire history of the repository a unique ID. This isn’t even very difficult:
+we can give every patch in the history of the repository a unique ID just by
+hashing its contents. For each patch, we can enumerate the lines that it adds
+and then for the rest of time, we can uniquely refer to those lines like “the
+third line added by patch <code class="highlighter-rouge">Ar8f</code>.”</p>
+

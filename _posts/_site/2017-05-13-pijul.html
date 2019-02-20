@@ -1,0 +1,479 @@
+<p>In the <a href="http://jneem.github.io/merging/">last post</a>, I talked about a mathematical
+framework for a version control system (VCS) without merge conflicts. In this
+post I’ll explore <a href="pijul.com">pijul</a>, which is a VCS based on a similar system.
+Note that pijul is under heavy development; this post is based on a development
+snapshot (I almost called it a “git” snapshot by mistake), and might be out of
+date by the time you read it.</p>
+
+<p>The main goal of this post is to describe how pijul handles what other VCSes
+call conflicts. We’ll see some examples where pijul’s approach works better than
+git’s, and I’ll discuss why.</p>
+
+<h1 id="some-basics">Some basics</h1>
+
+<p>I don’t want to write a full pijul tutorial here, but I do need to mention
+the basic commands if you’re to have any hope of understanding the rest
+of the post. Fortunately, pijul commands have pretty close analogues in
+other VCSes.</p>
+
+<ul>
+  <li><code class="highlighter-rouge">pijul init</code> creates a pijul repository, much like <code class="highlighter-rouge">git init</code> or <code class="highlighter-rouge">hg init</code>.</li>
+  <li><code class="highlighter-rouge">pijul add</code> tells pijul that it should start tracking a file, much like <code class="highlighter-rouge">git
+add</code> or <code class="highlighter-rouge">hg add</code>.</li>
+  <li><code class="highlighter-rouge">pijul record</code> looks for changes in the working directory and records a patch
+with those changes, so it’s similar to <code class="highlighter-rouge">git commit</code> or <code class="highlighter-rouge">hg commit</code>. Unlike
+those two (and much like <code class="highlighter-rouge">darcs record</code>), <code class="highlighter-rouge">pijul record</code> asks a million
+questions before doing anything; you probably want to use the <code class="highlighter-rouge">-a</code> option to
+stop it.</li>
+  <li><code class="highlighter-rouge">pijul fork</code> creates a new branch, like <code class="highlighter-rouge">git branch</code>. Unlike <code class="highlighter-rouge">git branch</code>,
+which creates a copy of the current branch, <code class="highlighter-rouge">pijul fork</code> defaults to creating a copy of
+the master branch. (This is a bug, apparently.)</li>
+  <li><code class="highlighter-rouge">pijul apply</code> adds a patch to the current branch, like <code class="highlighter-rouge">git cherry-pick</code>.</li>
+  <li><code class="highlighter-rouge">pijul pull</code> fetches and merges another branch into your current branch.
+The other branch could be a remote branch, but it could also just be a
+branch in the local repository.</li>
+</ul>
+
+<h1 id="dealing-with-conflicts">Dealing with conflicts</h1>
+
+<p>As I explained in the last post, pijul differs from other VCSes by not having
+merge conflicts. Instead, it has (what I call) <em>digles</em>, which are different
+from files in that their lines form a directed acyclic graph instead of
+a totally ordered list. The thing about digles is that you can’t really work
+with them (for example, by opening them in an editor), so pijul doesn’t let you
+actually see the digles: it stores them as digles internally, but renders them
+as files for you to edit. As an example, we’ll create a digle by asking pijul
+to perform the following merge:</p>
+
+<p><img src="../images/pijul_tikz_block_1.svg" alt="" /></p>
+
+<p>Here are the pijul commands to do this:</p>
+
+<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>$ pijul init
+
+# Create the initial file and record it.
+$ cat &gt; todo.txt &lt;&lt; EOF
+&gt; to-do
+&gt; * work
+&gt; EOF
+$ pijul add todo.txt
+$ pijul record -a -m todo
+
+# Switch to a new branch and add the shoes line.
+$ pijul fork --branch=master shoes
+$ sed -i '2i* shoes' todo.txt
+$ pijul record -a -m shoes
+
+# Switch to a third branch and add the garbage line.
+$ pijul fork --branch=master garbage
+$ sed -i '2i* garbage' todo.txt
+$ pijul record -a -m garbage
+
+# Now merge in the "shoes" change to the "garbage" branch.
+$ pijul pull . --from-branch shoes
+</code></pre></div></div>
+
+<p>The first thing to notice after running those commands is that pijul
+doesn’t complain about any conflicts (this is not intentional; it’s
+a known issue).
+Anyway, if you run
+the above commands then the final, merged version of <code class="highlighter-rouge">todo.txt</code> will
+look like this:</p>
+
+<p><img src="../images/pijul_tikz_block_2.svg" alt="" /></p>
+
+<p>That’s… a little disappointing, maybe, especially since pijul was supposed to
+free us from merge conflicts, and this looks a lot like a merge conflict. The
+point, though, is that pijul has to somehow produce a file – one that the
+operating system and your editor can understand – from the digle that it
+maintains internally. The output format just happens to look a bit like what
+other VCSes output when they need you to resolve a merge conflict.</p>
+
+<p>As it stands, pijul doesn’t have a very user-friendly way to actually see
+its internal digles. But with a little effort, you can figure it out. The
+secret is the command</p>
+
+<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>RUST_LOG="libpijul::backend=debug" pijul info --debug
+</code></pre></div></div>
+
+<p>For every branch, this will create a file named <code class="highlighter-rouge">debug_&lt;branchname&gt;</code> which
+describes, in graphviz’s <code class="highlighter-rouge">dot</code> format, the digles contained in that branch.
+That file’s a bit hard to read since it doesn’t directly tell you the actual
+contents of any line; in place of, for example, “to-do”, it just has
+a giant hex string corresponding to pijul’s internal identifiers for that line.
+To decode everything, you’ll need to look at the terminal output of that
+pijul command above. Part of it should look like this:</p>
+
+<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>DEBUG:libpijul::backend::dump: ============= dumping Contents
+DEBUG:libpijul::backend::dump: &gt; Key { patch: PatchId 0x0414005c0c2122ca, line: LineId(0x0200000000000000) } Value (0) { value: [Ok("")] }
+DEBUG:libpijul::backend::dump: &gt; Key { patch: PatchId 0x0414005c0c2122ca, line: LineId(0x0300000000000000) } Value (12) { value: [Ok("to-do\n")] }
+</code></pre></div></div>
+
+<p>By cross-referencing that output with the contents of <code class="highlighter-rouge">debug_&lt;branchname&gt;</code>,
+you can reconstruct pijul’s internal digles.
+Just this once, I’ve done it for you, and the result is exactly as it should be:</p>
+
+<p><img src="../images/pijul_tikz_block_3.svg" alt="" /></p>
+
+<h2 id="what-should-i-do-with-a-conflict">What should I do with a conflict?</h2>
+
+<p>Since pijul will happily work with digles internally, you could in principle
+ignore a conflict and work on other things. That’s probably a bad idea for
+several reasons (for starters, there are no good tools for working with digles,
+and their presence will probably break your build). So here’s my unsolicited
+opinion: when you have a conflict, you should resolve it ASAP.
+In the example above, all we need to do is remove the <code class="highlighter-rouge">&gt;&gt;&gt;</code> and <code class="highlighter-rouge">&lt;&lt;&lt;</code> lines
+and then record the changes:</p>
+
+<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>$ sed -i 3D;5D todo.txt
+$ pijul record -a -m resolve
+</code></pre></div></div>
+
+<p>To back up my recommendation for immediate flattening, I’ll give an example
+where pijul’s digle-to-file rendering is lossy. Here are two different digles:</p>
+
+<p><img src="../images/pijul_tikz_block_4.svg" alt="" /></p>
+
+<p>But pijul renders both in the same way:</p>
+
+<p><img src="../images/pijul_tikz_block_5.svg" alt="" /></p>
+
+<p>This is a perfectly good representation of the digle on the right, but it loses
+information from the one on the left (such as the fact that both “home” lines
+are the same, and the fact that “shop” and “home” don’t have a prescribed
+order). The good news here is that as long as your digle came from merging two
+<em>files</em>, then pijul’s rendering is lossless. That means you can avoid the
+problem by flattening your digles to files after every merge (i.e., by
+resolving your merge conflicts immediately).
+Like <a href="http://www.livescience.com/33995-cockroaches.html">cockroaches</a>,
+digles are important for the ecosystem as a whole, but you should still flatten them
+as soon as they appear.</p>
+
+<h2 id="case-study-1-reverting-an-old-commit">Case study 1: reverting an old commit</h2>
+
+<p>It’s (unfortunately) common to discover that an old commit introduced
+a show-stopper bug. On the bright side, every VCS worth its salt has some way
+of undoing the problematic commit without throwing away everything else you’ve
+written since then. But if the problematic commit predates a merge conflict,
+undoing it can be painful.</p>
+
+<p>As an illustration of what pijul brings to the table, we’ll look at
+a situation where pijul’s conflict-avoidance saves the day (at least,
+compared to git; darcs also does ok here).
+We’ll start with the example merge from before, including
+our manual digle resolution:</p>
+
+<p><img src="../images/pijul_tikz_block_6.svg" alt="" /></p>
+
+<p>Then we’ll ask pijul to revert the “shoes” patch:</p>
+
+<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>$ pijul unrecord --patch=&lt;hash-of-shoes-patch&gt;
+$ pijul revert
+</code></pre></div></div>
+
+<p>The result? We didn’t have any conflicts while reverting the old patch,
+and the final file is exactly what we expected:</p>
+
+<p><img src="../images/pijul_tikz_block_7.svg" alt="" /></p>
+
+<p>Let’s try the same thing with git:</p>
+
+<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>$ git init
+
+# Create the initial file and record it.
+$ cat &gt; todo.txt &lt;&lt; EOF
+&gt; to-do
+&gt; * work
+&gt; EOF
+$ git add todo.txt
+$ git commit -a -m todo
+
+# Switch to a new branch and add the shoes line.
+$ git checkout -b shoes
+$ sed -i '2i* shoes' todo.txt
+$ git commit -a -m shoes
+
+# Switch to a third branch and add the garbage line.
+$ git checkout -b garbage master
+$ sed -i '2i* garbage' todo.txt
+$ git commit -a -m garbage
+
+# Now merge in the "shoes" change to the "garbage" branch.
+$ git merge shoes
+Auto-merging todo.txt
+CONFLICT (content): Merge conflict in todo.txt
+Automatic merge failed; fix conflicts and then commit the result.
+</code></pre></div></div>
+
+<p>That was expected: there’s a conflict, so we have to resolve it. So I edited
+<code class="highlighter-rouge">todo.txt</code> and manually resolved the conflict. Then,</p>
+
+<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code># Commit the manual resolution.
+$ git commit -a -m merge
+# Try to revert the shoes patch.
+$ git revert &lt;hash-of-shoes-patch&gt;
+error: could not revert 4dcf1ae... shoes
+hint: after resolving the conflicts, mark the corrected paths
+hint: with 'git add &lt;paths&gt;' or 'git rm &lt;paths&gt;'
+hint: and commit the result with 'git commit'
+</code></pre></div></div>
+
+<p>Since git can’t “see through” my manual merge resolution, it can’t handle
+reverting the patch by itself. I have to manually resolve the conflicting
+patches both when applying and reverting.</p>
+
+<p>I won’t bore you with long command listings for other VCSes, but you can test
+them out yourself! I’ve tried mercurial (which does about the same as git in
+this example) and darcs (which does about the same as pijul in this example).</p>
+
+<h2 id="a-little-warning-about-pijul-unrecord">A little warning about <code class="highlighter-rouge">pijul unrecord</code></h2>
+
+<p>I’m doing my best to present roughly equivalent command sequences for pijul and
+git, but there’s something important you should know about the difference
+between <code class="highlighter-rouge">pijul unrecord</code> and <code class="highlighter-rouge">git revert</code>: <code class="highlighter-rouge">pijul unrecord</code> modifies the
+history of the repository, as though the unrecorded patch never existed. In
+this way, <code class="highlighter-rouge">pijul unrecord</code> is a bit like a selective version of <code class="highlighter-rouge">git reset</code>.
+This is probably not the functionality that you want, especially if you’re
+working on a public repository. Pijul actually does have the internal
+capability to do something closer to <code class="highlighter-rouge">git revert</code> (i.e., undo a patch while
+keeping it in the history), but it isn’t yet user-accessible.</p>
+
+<h1 id="sets-of-patches">Sets of patches</h1>
+
+<p>The time has come again to throw around some fancy math words. First,
+<em>associativity</em>. As you might remember, a binary operator (call it <code class="highlighter-rouge">+</code>)
+is associative if <code class="highlighter-rouge">(x + y) + z = x + (y + z)</code> for any <code class="highlighter-rouge">x</code>, <code class="highlighter-rouge">y</code>, and <code class="highlighter-rouge">z</code>.
+The great thing about associative operators is that you never need
+parentheses: you can just write <code class="highlighter-rouge">x + y + z</code> and there’s no ambiguity.
+Associativity automatically extends to more than three things: there’s also
+no ambiguity with <code class="highlighter-rouge">w + x + y + z</code>.</p>
+
+<p>The previous paragraph is relevant to patches because perfect merging
+is associative, in the following sense: if I have multiple patches
+(let’s say three to keep the diagrams manageable) then there’s a unique
+way to perfectly merge them all together. That three-way merge
+can be written as combinations of two-way merges in multiple different
+ways, but every way that I write it gives the same result. Let’s have some pictures.
+Here are my three patches:</p>
+
+<p><img src="../images/pijul_tikz_block_8.svg" alt="" /></p>
+
+<p>And here’s one way I could merge them all together:
+first, merge patches <code class="highlighter-rouge">p</code> and <code class="highlighter-rouge">q</code>:</p>
+
+<p><img src="../images/pijul_tikz_block_9.svg" alt="" /></p>
+
+<p>Then, merge patches <code class="highlighter-rouge">pm</code> (remember, that’s the patch I get from applying <code class="highlighter-rouge">p</code> and then <code class="highlighter-rouge">m</code>,
+which in the diagram above is the same as <code class="highlighter-rouge">qn</code>) and <code class="highlighter-rouge">r</code>:</p>
+
+<p><img src="../images/pijul_tikz_block_10.svg" alt="" /></p>
+
+<p>Another way would be to first merge <code class="highlighter-rouge">q</code> and <code class="highlighter-rouge">r</code>, and then merge <code class="highlighter-rouge">p</code> in to the result:</p>
+
+<p><img src="../images/pijul_tikz_block_11.svg" alt="" /></p>
+
+<p>Yet a third way would be to merge <code class="highlighter-rouge">p</code> and <code class="highlighter-rouge">q</code>, then merge <code class="highlighter-rouge">q</code> and <code class="highlighter-rouge">r</code>, and finally merge
+the results of those merges. This one gives a nice, symmetric picture:</p>
+
+<p><img src="../images/pijul_tikz_block_12.svg" alt="" /></p>
+
+<p>The great thing about our mathematical foundation from the previous post is
+that <em>all these merges produce the same result</em>. And I don’t just mean that
+they give the same final file: they also result in the same patches, meaning
+that everyone will always agree on which lines in the final file came from
+where. There isn’t even anything special about the initial configuration (three
+patches coming out of a single file). I could start with an arbitrarily complex
+history, and there would be an unambiguous way to merge together all of the
+patches that it contains. In this sense, we can say that the current state of
+a pijul branch is determined by a set of patches; this is in contrast to most
+existing VCSes, where the order in which patches are merged also matters.</p>
+
+<h2 id="reordering-and-antiquing-patches">Reordering and antiquing patches</h2>
+
+<p>One of the things you might have heard about pijul is that it can reorder
+patches (i.e. that they are commutative). This is not 100% accurate, and it
+might also be a bit confusing if you paid attention in my last post. That’s
+because a patch, according to the definition I gave before, <em>includes its input
+file</em>. So if you have a patch <code class="highlighter-rouge">p</code> that turns file <code class="highlighter-rouge">A</code> into file <code class="highlighter-rouge">B</code> and a patch
+<code class="highlighter-rouge">q</code> that turns file <code class="highlighter-rouge">B</code> into file <code class="highlighter-rouge">C</code>, then it makes sense to apply <code class="highlighter-rouge">p</code> and
+then <code class="highlighter-rouge">r</code> but not the other way around. It turns out that pijul has a nice trick
+up its sleeve, which allows you to reorder patches as long as they don’t
+“depend” (and I’ll explain what that means precisely) on each other.</p>
+
+<p>The key idea behind reordering patches is something I call “antiquing.”
+Consider the following sequenced patches:</p>
+
+<p><img src="../images/pijul_tikz_block_13.svg" alt="" /></p>
+
+<p>According to how we defined patches, the second patch (let’s call it the
+garbage patch) has to be applied after the first one (the shoes patch). On the
+other hand, it’s pretty obvious just by staring at them that the garbage patch
+doesn’t depend on the shoes patch. In particular, the following parallel
+patches convey exactly the same information, without the dependencies:</p>
+
+<p><img src="../images/pijul_tikz_block_14.svg" alt="" /></p>
+
+<p>How do I know for sure that they convey the same information? Because if we take
+the perfect merge of the diagram above then we get back the original sequenced
+diagram by following the top path in the merge!</p>
+
+<p><img src="../images/pijul_tikz_block_15.svg" alt="" /></p>
+
+<p>This example motivates the following definition: given a pair of patches
+<code class="highlighter-rouge">p</code> and <code class="highlighter-rouge">q</code> in sequence:</p>
+
+<p><img src="../images/pijul_tikz_block_16.svg" alt="" /></p>
+
+<p>we say that <code class="highlighter-rouge">q</code> can be <em>antiqued</em> if there exists some patch <code class="highlighter-rouge">a(q)</code> starting at <code class="highlighter-rouge">O</code>
+such that the perfect merge between <code class="highlighter-rouge">p</code> and <code class="highlighter-rouge">a(q)</code> involves <code class="highlighter-rouge">q</code>:</p>
+
+<p><img src="../images/pijul_tikz_block_17.svg" alt="" /></p>
+
+<p>In a case like this, we can just forget about <code class="highlighter-rouge">q</code> entirely, since <code class="highlighter-rouge">a(q)</code> carries
+the same information. I call it antiquing because it’s like making <code class="highlighter-rouge">q</code> look
+older than it really is.</p>
+
+<p>One great thing about the “sets of patches” thing above is that it let us
+easily generalize antiquing from pairs of patches to arbitrarily complicated
+histories. I’ll skip the details, but the idea is that you keep antiquing
+a patch – moving it back and back in the history – until you can’t any more.
+The fact that perfect merges are associative implies, as it turns out,
+that every patch has a unique “most antique” version. The set of patches
+leading into the most antique version of <code class="highlighter-rouge">q</code> are called <code class="highlighter-rouge">q</code>’s <em>dependencies</em>.
+For example, here is a pair of patches where the second one cannot be
+antiqued (as an exercise, try to explain why not):</p>
+
+<p><img src="../images/pijul_tikz_block_18.svg" alt="" /></p>
+
+<p>Since the second patch can’t be made any more antique, the first patch above is
+a dependency of the second one. In my next post, I’ll come back to antiquing
+(and specifically, the question of how to efficiently find the most
+antique version of a patch).</p>
+
+<p>I promised to talk about reordering patches, so why did I spend paragraphs
+going on about antiques? The point is that (again, because of the associative
+property of perfect merges) patches in “parallel” can be applied in any order.
+The point of antiquing is to make patches as parallel as possible, and so
+then we can be maximally flexible about ordering them.</p>
+
+<p>That last bit is important, so it’s worth saying again (and with a picture):
+patches in sequence</p>
+
+<p><img src="../images/pijul_tikz_block_19.svg" alt="" /></p>
+
+<p>cannot be re-ordered; the same information represented in parallel using an
+antique of <code class="highlighter-rouge">q</code></p>
+
+<p><img src="../images/pijul_tikz_block_20.svg" alt="" /></p>
+
+<p>is much more flexible.</p>
+
+<h2 id="case-study-2-parallel-development">Case study 2: parallel development</h2>
+
+<p>Since I’ve gone on for so long about reordering patches, let’s have an example
+showing what it’s good for. Let me start with some good news: you don’t need
+to know about antiquing to use pijul, because pijul does it all for you:
+whenever pijul records a patch, it automatically records the most antique
+version of that patch. All you’ll notice is the extra flexibility it brings.</p>
+
+<p>We’ll simulate (a toy example of) a common scenario: you’re maintaining a
+long-running branch of a project that’s under active development (maybe you’re
+working on a large experimental feature). Occasionally, you need to
+exchange some changes with the master branch. Finally (maybe your experimental feature
+was a huge success) you want to merge everything back into master.</p>
+
+<p>Specifically, we’re going to do the following experiment in both pijul and git.
+The master branch will evolve in the following sequence:</p>
+
+<p><img src="../images/pijul_tikz_block_21.svg" alt="" /></p>
+
+<p>On our private branch, we’ll begin from the same initial file.
+We’ll start by applying the urgent fix from the master branch
+(it fixed a critical bug, so we can’t wait):</p>
+
+<p><img src="../images/pijul_tikz_block_22.svg" alt="" /></p>
+
+<p>Then we’ll get to implementing our fancy experimental features:</p>
+
+<p><img src="../images/pijul_tikz_block_23.svg" alt="" /></p>
+
+<p>I’ll leave out the (long) command listings needed to implement the steps
+above in pijul and git, but let me mention the one step that we
+didn’t cover before: in order to apply the urgent fix from master, we say</p>
+
+<div class="highlighter-rouge"><div class="highlight"><pre class="highlight"><code>$ pijul changes --branch master # Look for the patch you want
+$ pijul apply &lt;hash-of-the-patch&gt;
+</code></pre></div></div>
+
+<p>In git, of course, we’ll use cherry-pick.</p>
+
+<p>Now for the results. In pijul, merging our branch with the master branch
+gives no surprises:</p>
+
+<p><img src="../images/pijul_tikz_block_24.svg" alt="" /></p>
+
+<p>In git, we get a conflict:</p>
+
+<p><img src="../images/pijul_tikz_block_25.svg" alt="" /></p>
+
+<p>There’s something else a bit funny with git’s behavior here: if we resolve the
+conflict and look at the
+history, there are two copies of the urgent fix, with two different hashes.
+Since git doesn’t understand patch reordering like pijul does, <code class="highlighter-rouge">git
+cherry-pick</code> and <code class="highlighter-rouge">pijul apply</code> work in slightly different ways: <code class="highlighter-rouge">pijul apply</code>
+just adds another patch into your set of patches, while <code class="highlighter-rouge">git cherry-pick</code>
+actually creates a new patch that looks a bit like the original. From then on,
+git sees the original patch and its cherry-picked one as two different patches,
+which (as we’ve seen) creates problems from merging down the line.
+And it gets worse: reverting one of the copies of the urgent fix (try it!) gives
+pretty strange results.</p>
+
+<p>By playing around with this example, you can get git to do some
+slightly surprising things. (For example, by inserting an extra merge in
+the right place, you can get the conflict to go away. That’s because git
+has a heuristic where if it sees two different patches doing the same
+thing, it suppresses the conflict.)</p>
+
+<p>Pijul, on the other hand, understood that the urgent fix could be incorporated
+into my private branch with no lossy modifications. That’s
+because pijul silently antiqued the urgent fix, so that
+the divergence between the master branch and my own branch became irrelevant.</p>
+
+<h1 id="conclusion">Conclusion</h1>
+
+<p>So hopefully you have some idea now of what pijul can and can’t do for you.
+It’s an actively developed implementation of an exciting (for me, at least) new
+way of looking at patches and merges, and it has a simple, fast, and totally
+lossless merge algorithm with nice properties.</p>
+
+<p>Will it dethrone git? Certainly not yet. For a start, it’s still
+alpha-quality and under heavy development; not only should you be
+worried about your data, it has several UI warts as well. Looking toward
+the future, I can see reasonable arguments in both directions.</p>
+
+<p>Arguing against pijul’s future world domination, you could question the
+relevance of the examples I’ve shown. How often do you really end up tripping
+on git’s little corner cases? Would the time saved from pijul’s improvements
+actually justify the cost of switching? Those are totally reasonable
+questions, and I don’t know the answer.</p>
+
+<p>But here’s a more optimistic point of view: pijul’s effortless merging
+and reordering might really lead to new and productive workflows. Are you
+old enough to remember when git was new and most people were still on SVN
+(or even CVS)? Lots of people were (quite reasonably) skeptical. “Who
+cares about easy branching? It’s better to merge changes immediately anyway.”
+Or, “who cares about distributed repositories? We have a central server,
+so we may as well use it.” Those arguments sound silly now that we’re
+all used to DVCSes and the workflow improvements that they bring, but
+it took time and experimentation to develop those workflows, and the gains
+weren’t always obvious beforehand. Could the same progression happen with
+pijul?</p>
+
+<p>In the next post, I’ll take a look at pijul’s innards, focussing particularly on
+how it represents your precious data.</p>
+
+<h1 id="acknowledgement">Acknowledgement</h1>
+
+<p>I’d like to thank Pierre-Étienne Meunier for his comments and corrections on
+a draft of this post. Of course, any errors that remain are my own
+responsibility.</p>

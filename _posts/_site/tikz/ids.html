@@ -1,0 +1,147 @@
+<p>I’ve written quite a bit about the <em>theory</em> of patches and merging, but nothing
+yet about how to actually implement anything efficiently. TODO…</p>
+
+<h1 id="three-scales-of-size">Three scales of size</h1>
+
+<p>Before getting to the juicy details, we have to decide what it means for things
+to be fast. In a VCS, there are three different size scales that we need
+to think about. From smallest to biggest, we have:</p>
+
+<ol>
+  <li>The size of the <em>change</em>. Like, if we’re changing one line in a giant file,
+then the size of the change is just the length of the one line that we’re
+changing.</li>
+  <li>The size of the <em>current repository</em>. In the case of <code class="highlighter-rouge">jp</code> (which just tracks
+a single file), this is just the size of the file.</li>
+  <li>The size of the <em>history</em>. This includes everything that has ever been in
+the repository, so if the repository has been active for years then the size
+of the history could be much bigger than the current size.</li>
+</ol>
+
+<p>The first obvious requirement is that the size of a patch should be
+proportional to the size of the change. This sounds almost too obvious to
+mention, but remember the definition of a patch from <a href="https://??">this</a> post: a
+patch consists of a source file, a target file, and a function from one to the
+other that has certain additional properties. If we were to naively translate
+this definition into code, the size of a patch would be proportional to the
+size of the entire file.</p>
+
+<p>Of course, this is a solved problem in the world of UNIX-style diffs (which I
+mentioned all the way back in the <a href="https://??">first post</a>). The problem is to 
+adapt the diff approach to our mathematical patch framework; for example, the
+fact that our files need not even be ordered means that it doesn’t make sense
+to talk about inserting a line “after line 62.”</p>
+
+<p>The key to solving this turns out to be to unique IDs: give every line in the
+entire history of the repository a unique ID. This isn’t even very difficult:
+we can give every patch in the history of the repository a unique ID just by
+hashing its contents. For each patch, we can enumerate the lines that it adds
+and then for the rest of time, we can uniquely refer to those lines like “the
+third line added by patch <code class="highlighter-rouge">Ar8f</code>.”</p>
+
+<h1 id="representing-patches">Representing patches</h1>
+
+<p>Once we’ve added unique ids to every line, it becomes pretty easy to encode
+patches compactly. For example, suppose we want to describe this patch:</p>
+
+<pre><code class="language-tikz">DAGLE (0, 0)
+PARENT 0 POS 1/1 dA/0: to-do
+PARENT 1 POS 2/1 dA/1: * shoes
+PARENT 2 POS 3/1 dA/2: * garbage
+
+DAGLE (50, 0)
+PARENT 0 POS 1/1 dA/0: to-do
+PARENT 1 POS 2/1 GHOST dA/1: * shoes
+PARENT 2 POS 3/1 dA/2: * garbage
+PARENT 3 POS 4/1 x5/0: * work
+
+EDGES
+a1 b1
+a2 b2 dashed
+a3 b3
+</code></pre>
+
+<p>Here, <code class="highlighter-rouge">dA</code> is the unique ID of the patch that introduced the to-do, shoes, and
+garbage lines, and <code class="highlighter-rouge">x5</code> is the unique ID of the patch that we want to describe.
+Anyway, the patch is now easy to describe by using the unique IDs to specify
+what we want to do: delete the line with ID <code class="highlighter-rouge">dA/1</code>, add the line with ID <code class="highlighter-rouge">x5/0</code>
+and contents “* work”, and add an edge from the line <code class="highlighter-rouge">dA/2</code> to the line
+<code class="highlighter-rouge">x5/0</code>.</p>
+
+<p>Let’s have a quick look at how this is implemented in <code class="highlighter-rouge">jp</code>, by taking a peek at
+the <a href="https://??">API docs</a>. Patches, funnily enough, are represented by the
+<a href="https://??"><code class="highlighter-rouge">Patch</code></a> struct, which basically consists of metadata (author,
+commit message, timestamp) and a list of <a href="https://??"><code class="highlighter-rouge">Change</code></a>s. The <code class="highlighter-rouge">Change</code>s
+are the most interesting part, and they look like this:</p>
+
+<div class="language-rust highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">pub</span> <span class="k">enum</span> <span class="n">Change</span> <span class="p">{</span>
+    <span class="n">NewNode</span> <span class="p">{</span> <span class="n">id</span><span class="p">:</span> <span class="n">NodeId</span><span class="p">,</span> <span class="n">contents</span><span class="p">:</span> <span class="nb">Vec</span><span class="o">&lt;</span><span class="nb">u8</span><span class="o">&gt;</span> <span class="p">},</span>
+    <span class="n">DeleteNode</span> <span class="p">{</span> <span class="n">id</span><span class="p">:</span> <span class="n">NodeId</span> <span class="p">},</span>
+    <span class="n">NewEdge</span> <span class="p">{</span> <span class="n">src</span><span class="p">:</span> <span class="n">NodeId</span><span class="p">,</span> <span class="n">dest</span><span class="p">:</span> <span class="n">NodeId</span> <span class="p">},</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p>In other words, the example that we saw above is basically all there is to it,
+as far as patches go.</p>
+
+<h1 id="antiquing">Antiquing</h1>
+
+<p>I introduced unique IDs as a way to achieve compact representations of patches,
+but it turns out that they also solve a problem that I promised to explain <a href="https://jneem.github.io/pijul/">two
+years ago</a>: how do I compute the “most antique”
+version of a patch? Or equivalently, if I have some patch but I want to apply
+it to a slightly different repository, how do I know whether I can do that?
+With our description of patches above, this is completely trivial: a patch can
+only add lines, delete lines, or add edges. Adding lines is always valid, no
+matter what the repository contains. Deleting lines and adding edges can be
+done if and only if the lines to delete, or the lines to connect, exist in the
+repository. Since lines have unique IDs, checking this is unambiguous.
+Actually, it’s really easy because the line IDs are tied to the patch that
+introduced them: a patch can be applied if and only if all the patch IDs that
+it refers to have already been applied. For obvious reasons, we refer to these
+as “dependencies”: the dependencies of a patch are all the other patches that
+it refers to in <code class="highlighter-rouge">DeleteNode</code> and <code class="highlighter-rouge">NewEdge</code> commands. You can see this in action
+<a href="https://github.com/jneem/jp/blob/ac45f45561457091cafd5d8c3ddbda0e1059a7e6/libjp/src/patch.rs#L192">here</a>.</p>
+
+<h1 id="applying-patches">Applying patches</h1>
+
+<p>Now that we know how to compactly represent patches, how quickly can we apply
+them?  To get really into detail here, we’d need to talk about how the state of
+the repository is represented on disk (which is an interesting topic on its
+own, but a bit out of scope for this post). Let’s just pretend for now that the
+current state of the repository is stored as a graph in memory, using some
+general-purpose crate
+(like, say, <a href="https://docs.rs/petgraph/0.4.13/petgraph/"><code class="highlighter-rouge">petgraph</code></a>).
+Each node in the graph needs to store the contents of the corresponding line,
+as well as a “tombstone” saying whether it has been deleted
+(see <a href="https://jneem.github.io/merging/">the first post</a>). Assuming we can
+add nodes and edges in constant time (like, say, in <code class="highlighter-rouge">petgraph</code>), applying
+a single change is a constant time operation. That means the time it takes
+to apply the whole patch is proportional to the number of changes.
+That’s the best we could hope for, so we’re done, right? What was even the
+point of the part about three size scales?</p>
+
+<h1 id="revenge-of-the-ghosts">Revenge of the ghosts</h1>
+
+<p>Imagine you have a file that contains three lines:</p>
+
+<div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>first line
+second line
+third line
+</code></pre></div></div>
+
+<p>but behind the scenes, there are a bunch of lines that used to be there. So
+<code class="highlighter-rouge">jp</code>’s representation of your file would look like:</p>
+
+<pre><code class="language-tikz">DAGLE (0, 0)
+PARENT 0 POS 1/1 first line
+PARENT 1 POS 2/1 GHOST sceond line
+PARENT 2 POS 3/1 GHOST oops
+PARENT 3 POS 4/1 GHOST second lnie
+PARENT 4 POS 5/1 GHOST aargh
+PARENT 5 POS 6/1 GHOST secondl ine
+PARENT 6 POS 7/1 GHOST ok
+PARENT 7 POS 8/1 GHOST calm down
+PARENT 8 POS 9/1 second line
+PARENT 9 POS 10/1 third line
+</code></pre>

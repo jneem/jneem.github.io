@@ -1,0 +1,38 @@
+title: "A new version"
+author: "Joe Neeman"
+description: "Some thoughts about version control"
+
+# Jekyll settings
+permalink: /:title/          # see https://jekyllrb.com/docs/permalinks/
+paginate: 2                  # number of articles per page, remove to disable pagination
+excerpt_separator: "\n\n\n"  # indicates the end of the excerpt by two blank lines
+
+# Page settings
+show_excerpts: true          # show article previews on the home page instead of headlines
+hide_title: false            # remove site heading in the header
+post_footer: true            # show previous and next links at the end of each post
+date_format: "%B %d, %Y"     # see http://shopify.github.io/liquid/filters/date/
+
+# Theme settings
+style: contrast              # choose between "default", "contrast" and "minimal"
+dark_theme: false            # enables dark mode
+
+navigation:                  # (optional) site navigation in the header
+  - index.html
+  - archive.md
+  - about.md
+
+icons:                       # (optional) icons in the header, see http://fontawesome.com/icons
+  envelope: "mailto:"
+  github: "https://github.com"
+  rss: "/feed.xml"
+
+comments:                    # embed disqus or isso comments
+#  disqus: ""
+#  isso: ""
+
+plugins: 
+ - jekyll-feed
+ - jekyll-paginate
+ - jekyll-default-layout
+
