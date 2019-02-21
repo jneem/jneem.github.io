@@ -18,7 +18,7 @@ Two years later, I'm finally ready to continue with this series of posts (but
 having learned from my earlier mistakes, I'm not going to predict the total
 number of posts ahead of time). In the meantime, I've written my own toy
 version control system (VCS) to help me understand what's going on. It's called
-[`quilt`](https://github.com/jneem/quilt), and it's extremely primitive: to start
+[`ojo`](https://github.com/jneem/ojo), and it's extremely primitive: to start
 with, it can only track a single file. However, it is (just barely)
 sophisticated enough to demonstrate the important ideas. I'm also doing my best
 to make the code is clear and well-documented.

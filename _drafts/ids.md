@@ -15,7 +15,7 @@ to think about. From smallest to biggest, we have:
 1. The size of the *change*. Like, if we're changing one line in a giant file,
    then the size of the change is just the length of the one line that we're
    changing.
-2. The size of the *current repository*. In the case of `quilt` (which just tracks
+2. The size of the *current repository*. In the case of `ojo` (which just tracks
    a single file), this is just the size of the file.
 3. The size of the *history*. This includes everything that has ever been in
    the repository, so if the repository has been active for years then the size
@@ -56,7 +56,7 @@ what we want to do: delete the line with ID `dA/1`, add the line with ID `x5/0`
 and contents "\* work", and add an edge from the line `dA/2` to the line
 `x5/0`.
 
-Let's have a quick look at how this is implemented in `quilt`, by taking a peek at
+Let's have a quick look at how this is implemented in `ojo`, by taking a peek at
 the [API docs](https://??). Patches, funnily enough, are represented by the
 [`Patch`](https://??) struct, which basically consists of metadata (author,
 commit message, timestamp) and a list of [`Change`](https://??)s. The `Change`s
@@ -90,7 +90,7 @@ introduced them: a patch can be applied if and only if all the patch IDs that
 it refers to have already been applied. For obvious reasons, we refer to these
 as "dependencies": the dependencies of a patch are all the other patches that
 it refers to in `DeleteNode` and `NewEdge` commands. You can see this in action
-[here](https://github.com/jneem/quilt/blob/2a6e69144c6d4ab64fc84c7ecbaf7a6a25a1d753/libquilt/src/patch.rs#L203).
+[here](https://github.com/jneem/ojo/blob/c0eac6d5248e6ef4f811b72819794786b54f09a4/libojo/src/patch.rs#L203).
 
 # Applying patches
 
@@ -121,7 +121,7 @@ last line
 ```
 
 but behind the scenes, there are a bunch of lines that used to be there. So
-`quilt`'s representation of your file might look like:
+`ojo`'s representation of your file might look like:
 
 ![](../images/ids_tikz_block_2.svg)
 
@@ -130,7 +130,7 @@ of a single `DeleteLine` command, and it takes almost no time to apply:
 
 ![](../images/ids_tikz_block_3.svg)
 
-Now that we have this internal representation, `quilt` needs to create a file
+Now that we have this internal representation, `ojo` needs to create a file
 on disk showing the new state. That is, we want to somehow go from the internal
 representation above to the file
 
