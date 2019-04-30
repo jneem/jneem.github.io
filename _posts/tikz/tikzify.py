@@ -8,8 +8,10 @@
 # of what goes in the tikz codeblocks is ad-hoc and undocumented. You'll have to
 # read this script, sorry.
 
+import hashlib
 import os
 import os.path
+import pickle
 import re
 import shutil
 import subprocess
@@ -145,7 +147,7 @@ def write_all(in_lines, out_file):
     print(r"""
 \documentclass{standalone}
 \usepackage{tikz}
-\usetikzlibrary{positioning}
+\usetikzlibrary{fit,positioning,shapes}
 \usetikzlibrary{arrows.meta}
 
 \begin{document}
@@ -169,26 +171,46 @@ def tex_it(in_lines, out_name):
             subprocess.run(['pdf2svg', pdf_name, out_name])
 
 def process_md(in_name, out_name):
+    old_hashes = {}
+    hashes = {}
+    try:
+        with open(out_name + '.pickle', 'rb') as pickle_file:
+            old_hashes = pickle.load(pickle_file)
+    except Exception as e:
+        print("error reading the old pickle file")
+        print(e)
+
     with open(in_name) as in_file:
         with open(out_name, 'w') as out_file:
             cur_lines = []
             in_tikz_block = False
             cur_block_num = 1
             basename = os.path.splitext(os.path.basename(in_name))[0]
+            hasher = hashlib.sha256()
             for line in in_file.readlines():
                 if in_tikz_block and line.startswith('```'):
                     svg_name = '../images/{}_tikz_block_{}.svg'.format(basename, cur_block_num)
-                    tex_it(cur_lines, svg_name)
+                    if not os.path.isfile(svg_name) or old_hashes.get(svg_name) != hasher.hexdigest():
+                        tex_it(cur_lines, svg_name)
+                    else:
+                        print('block {} unchanged, not re-TeXing it'.format(cur_block_num))
+
                     in_tikz_block = False
                     cur_block_num += 1
+                    hashes[svg_name] = hasher.hexdigest()
                     cur_lines.clear()
                     print('![]({})'.format(svg_name), file=out_file)
                 elif not in_tikz_block and line.startswith('```tikz'):
                     in_tikz_block = True
+                    hasher = hashlib.sha256()
                 elif in_tikz_block:
                     cur_lines.append(line)
+                    hasher.update(line.encode())
                 else:
                     out_file.write(line)
 
+    with open(out_name + '.pickle', 'wb') as pickle_file:
+        print(hashes)
+        pickle.dump(hashes, pickle_file)
 
 process_md(sys.argv[1], sys.argv[2])
