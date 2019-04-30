@@ -1,7 +1,10 @@
 ---
+draft: true
 layout: post
 title: "Part 5: Pseudo-edges"
 ---
+
+DRAFT
 
 The goal of this post is to describe pseudo-edges: what they are, how to
 compute them efficiently, and how to update them efficiently upon small

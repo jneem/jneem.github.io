@@ -3,6 +3,7 @@ layout: default
 ---
 {% if site.show_excerpts and page.name == "index.html" %}
 {% for page in paginator.posts %}
+{% unless page.draft %}
 <article>
   <header>
     {%- assign date_format = site.date_format | default: "%B %d, %Y" -%}
@@ -14,6 +15,7 @@ layout: default
   <footer><a class="ghost" href="{{ page.url | relative_url }}">read more »</a></footer>
   {% endunless %}
 </article>
+{% endunless %}
 {% endfor %}
 {% if paginator.total_pages > 1 %}
 <footer>
@@ -27,11 +29,13 @@ layout: default
   {{ content }}
   <header><h1>Posts</h1></header>
   {% for post in site.posts %}
+  {% unless post.draft %}
   {%- assign date_format = site.date_format | default: "%B %d, %Y" -%}
   <div>
     <time datetime="{{ post.date | date_to_xmlschema }}">{{ post.date | date: date_format }}</time>
     <h3><a href="{{ post.url | relative_url }}">{{ post.title }}</a></h3>
   </div>
+  {% endunless %}
   {% endfor %}
 </article>
 {% endif %}
