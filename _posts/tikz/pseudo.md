@@ -1,17 +1,14 @@
 ---
-draft: true
 layout: post
 title: "Part 5: Pseudo-edges"
 ---
-
-DRAFT
 
 The goal of this post is to describe pseudo-edges: what they are, how to
 compute them efficiently, and how to update them efficiently upon small
 changes. To recall the important points from the
 [last post]({{ site.baseurl }}{% post_url 2019-02-25-ids %}):
 
-- We (pretend, for now that we) represent the state of the repository as a
+- We (pretend, for now, that we) represent the state of the repository as a
   graph in memory: one node for every line, with a directed edges that enforce
   ordering constraints between two lines. Each line has a flag that says
   whether it is deleted or not.
