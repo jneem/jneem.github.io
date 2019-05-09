@@ -3,6 +3,10 @@ layout: post
 title: "Part 5: Pseudo-edges"
 ---
 
+This is the fifth (and final planned) post in a series on some new ideas
+in version control. To start at the beginning,
+[go here]({{ site.baseurl }}{% post_url 2017-05-08-merging %}).
+
 The goal of this post is to describe pseudo-edges: what they are, how to
 compute them efficiently, and how to update them efficiently upon small
 changes. To recall the important points from the
