@@ -23,8 +23,8 @@ navigation:                  # (optional) site navigation in the header
   - about.md
 
 icons:                       # (optional) icons in the header, see http://fontawesome.com/icons
-  envelope: "mailto:"
-  github: "https://github.com"
+  envelope: "mailto:joeneeman@gmail.com"
+  github: "https://github.com/jneem"
   rss: "/feed.xml"
 
 comments:                    # embed disqus or isso comments
